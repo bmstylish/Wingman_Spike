@@ -13,6 +13,7 @@ SECOND_BOT_COMMAND_URL = 'http://localhost:8000/join'
 WINGMAN_LEAVE_URL = 'http://localhost:8001/wingman_leave'
 SECOND_BOT_LEAVE_URL = 'http://localhost:8000/leave'
 MP3_FILE_PATH = 'resource/planting.mp3'
+DEFUSE_SOUND_PATH = 'resource/defuse.mp3'
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -33,7 +34,7 @@ async def on_ready():
 @bot.tree.command(name="wingman_plant_the_spike", description="Wingman plant the spike")
 async def wingman_plant_the_spike(interaction: discord.Interaction):
     if interaction.user.voice is None:
-        await interaction.response.send_message("You are not connected to a voice channel.")
+        await interaction.response.send_message("You are not onsite.")
         return
 
     channel = interaction.user.voice.channel
@@ -44,7 +45,7 @@ async def wingman_plant_the_spike(interaction: discord.Interaction):
 
     # Ensure the MP3 file exists
     if not os.path.isfile(MP3_FILE_PATH):
-        await interaction.response.send_message(f"MP3 file not found at {MP3_FILE_PATH}.")
+        await interaction.response.send_message(f"You do not have the spike... {MP3_FILE_PATH}.")
         return
 
     # Play the MP3 file
@@ -52,9 +53,9 @@ async def wingman_plant_the_spike(interaction: discord.Interaction):
         interaction.guild.voice_client.stop()
         audio_source = discord.FFmpegPCMAudio(MP3_FILE_PATH)
         interaction.guild.voice_client.play(audio_source)
-        await interaction.response.send_message("Playing the MP3 file!")
+        await interaction.response.send_message("Wingman is planting the spike!")
     except Exception as e:
-        await interaction.response.send_message(f"Failed to play MP3 file: {e}")
+        await interaction.response.send_message(f"Wingman cannot plant the spike... {e}")
         return
 
     # Wait until the audio is done playing
@@ -84,14 +85,25 @@ async def defuse(interaction: discord.Interaction):
         await interaction.response.send_message("You are not connected to a voice channel.")
         return
 
-    # Send a request to Bot2 to stop the disconnection task
-    async with aiohttp.ClientSession() as session:
-        async with session.post('http://localhost:8000/stop_disconnection', json={'guild_id': interaction.guild.id}) as resp:
-            if resp.status == 200:
-                await interaction.response.send_message("Disconnection stopped, defusing the spike.")
-            else:
-                await interaction.response.send_message("Failed to stop the disconnection task.")
+    channel = interaction.user.voice.channel
+    voice_client = interaction.guild.voice_client
 
+    # Join the voice channel if not already connected
+    if voice_client is None or voice_client.channel != channel:
+        await channel.connect()
+
+    # Play the defuse sound
+    if os.path.isfile(DEFUSE_SOUND_PATH):
+        defuse_audio_source = discord.FFmpegPCMAudio(DEFUSE_SOUND_PATH)
+        if voice_client and not voice_client.is_playing():
+            voice_client.play(defuse_audio_source, after=lambda e: print(f"Error playing defuse sound: {e}") if e else None)
+        else:
+            await interaction.response.send_message("The bot is not connected to a voice channel or already playing audio.")
+            return
+    else:
+        await interaction.response.send_message(f"Defuse sound file not found at {DEFUSE_SOUND_PATH}.")
+        return
+    
     # Disconnect Bot2 from the voice channel
     async with aiohttp.ClientSession() as session:
         async with session.post(SECOND_BOT_LEAVE_URL, json={'guild_id': interaction.guild.id}) as resp:

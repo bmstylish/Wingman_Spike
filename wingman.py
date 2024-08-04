@@ -11,6 +11,7 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 SECOND_BOT_COMMAND_URL = 'http://localhost:8000/join'
 WINGMAN_LEAVE_URL = 'http://localhost:8001/wingman_leave'
+SECOND_BOT_LEAVE_URL = 'http://localhost:8000/leave'
 MP3_FILE_PATH = 'resource/planting.mp3'
 
 intents = discord.Intents.default()
@@ -29,7 +30,7 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-@bot.tree.command(name="wingman_plant_the_spike", description="Join the voice channel and play MP3")
+@bot.tree.command(name="wingman_plant_the_spike", description="Wingman plant the spike")
 async def wingman_plant_the_spike(interaction: discord.Interaction):
     if interaction.user.voice is None:
         await interaction.response.send_message("You are not connected to a voice channel.")
@@ -76,6 +77,28 @@ async def leave(interaction: discord.Interaction):
     if interaction.guild.voice_client is not None:
         await interaction.guild.voice_client.disconnect()
     await interaction.response.send_message("Left the voice channel.")
+
+@bot.tree.command(name="defuse", description="Defuse the spike")
+async def defuse(interaction: discord.Interaction):
+    if interaction.user.voice is None:
+        await interaction.response.send_message("You are not connected to a voice channel.")
+        return
+
+    # Send a request to Bot2 to stop the disconnection task
+    async with aiohttp.ClientSession() as session:
+        async with session.post('http://localhost:8000/stop_disconnection', json={'guild_id': interaction.guild.id}) as resp:
+            if resp.status == 200:
+                await interaction.response.send_message("Disconnection stopped, defusing the spike.")
+            else:
+                await interaction.response.send_message("Failed to stop the disconnection task.")
+
+    # Disconnect Bot2 from the voice channel
+    async with aiohttp.ClientSession() as session:
+        async with session.post(SECOND_BOT_LEAVE_URL, json={'guild_id': interaction.guild.id}) as resp:
+            if resp.status == 200:
+                await interaction.followup.send("Bot2 has been disconnected from the voice channel.")
+            else:
+                await interaction.followup.send("Failed to disconnect Bot2 from the voice channel.")
 
 async def handle_wingman_leave(request):
     data = await request.json()

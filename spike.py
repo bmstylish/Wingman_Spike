@@ -11,7 +11,7 @@ load_dotenv()
 TOKEN = os.getenv('SECOND_BOT_TOKEN')
 
 intents = discord.Intents.default()
-intents.message_content = True  # Enable message content intents if using discord.py v2.0+
+intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 app = web.Application()
@@ -27,7 +27,7 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-@bot.tree.command(name="plant_the_spike", description="Join the voice channel and play an MP3")
+@bot.tree.command(name="plant_the_spike", description="Hold 4 to plant the spike")
 async def join(interaction: discord.Interaction):
     if interaction.user.voice is None:
         await interaction.response.send_message("You are not connected to a voice channel.")
@@ -40,37 +40,29 @@ async def join(interaction: discord.Interaction):
         await channel.connect()
 
     await interaction.response.send_message("Joined the voice channel and playing audio!")
-    
+
     await play_audio_and_check_command(interaction.guild, interaction.user, channel, interaction)
 
-@bot.tree.command(name="leave", description="Leave the voice channel")
-async def leave(interaction: discord.Interaction):
-    if interaction.guild.voice_client:
-        await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message('Left the voice channel.')
-    else:
-        await interaction.response.send_message('I am not in a voice channel.')
-
-@bot.tree.command(name="defuse", description="Stop everyone from disconnecting and stop the MP3")
+@bot.tree.command(name="defuse", description="Hold 4 to defuse the spike")
 async def defuse(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     if guild_id in pending_disconnects:
         pending_disconnects[guild_id].cancel()
         del pending_disconnects[guild_id]
-        
+
         if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
             interaction.guild.voice_client.stop()
-        
+
         if interaction.guild.voice_client:
             await interaction.guild.voice_client.disconnect()
-        
-        await interaction.response.send_message('Defuse command received, everyone will stay connected, and the bot has disconnected.')
+
+        await interaction.response.send_message('Spike has been defused')
     else:
-        await interaction.response.send_message('There is no pending disconnect to defuse.')
+        await interaction.response.send_message('There is no spike to defuse')
 
 async def handle_join_request(request):
     data = await request.json()
-    
+
     guild_id = data.get('guild_id')
     channel_id = data.get('channel_id')
     user_id = data.get('user_id')  # Get user ID from the request data
@@ -101,8 +93,42 @@ async def handle_join_request(request):
             return web.Response(text="Joined the voice channel!")
     return web.Response(status=400, text="Failed to join the voice channel.")
 
+@bot.tree.command(name="leave", description="Leave the voice channel")
+async def leave(interaction: discord.Interaction):
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        await interaction.response.send_message('Left the voice channel.')
+    else:
+        await interaction.response.send_message('I am not in a voice channel.')
+
+async def handle_stop_disconnection(request):
+    data = await request.json()
+    guild_id = data.get('guild_id')
+
+    if guild_id not in pending_disconnects:
+        return web.Response(status=400, text="No pending disconnection task found.")
+
+    disconnect_task = pending_disconnects[guild_id]
+    disconnect_task.cancel()
+    del pending_disconnects[guild_id]
+
+    return web.Response(status=200, text="Disconnection task stopped.")
+
+async def handle_leave_request(request):
+    data = await request.json()
+    guild_id = data.get('guild_id')
+
+    guild = bot.get_guild(guild_id)
+    if guild and guild.voice_client:
+        await guild.voice_client.disconnect()
+        return web.Response(text="Bot has left the voice channel.")
+    return web.Response(status=400, text="Bot failed to leave the voice channel.")
+
+app.add_routes([web.post('/stop_disconnection', handle_stop_disconnection)])
+app.add_routes([web.post('/join', handle_join_request)])
+app.add_routes([web.post('/leave', handle_leave_request)])
+
 async def play_audio_and_check_command(guild, user, channel, interaction=None):
-    # Path to your MP3 file
     mp3_path = 'resource/timer.mp3'
     voice_client = guild.voice_client
     voice_client.play(discord.FFmpegPCMAudio(mp3_path))
@@ -110,27 +136,26 @@ async def play_audio_and_check_command(guild, user, channel, interaction=None):
     def check(message):
         return message.content.lower() == '!specific_command' and message.author == user
 
-    disconnect_task = asyncio.create_task(disconnect_users_after_timeout(guild, user, channel, interaction))
+    disconnect_task = asyncio.create_task(
+        disconnect_users_after_timeout(guild, user, channel, interaction))
     pending_disconnects[guild.id] = disconnect_task
 
     try:
-        await bot.wait_for('message', check=check, timeout=13)  # Wait for 3 minutes
+        await bot.wait_for('message', check=check, timeout=13)
         disconnect_task.cancel()
         del pending_disconnects[guild.id]
         if interaction:
             await interaction.followup.send('Command received in time, no one will be disconnected.')
     except asyncio.TimeoutError:
-        pass  # Timeout will be handled by the disconnect_users_after_timeout function
+        pass
 
 async def disconnect_users_after_timeout(guild, user, channel, interaction=None):
-    await asyncio.sleep(13)  # Wait for the timeout period
+    await asyncio.sleep(13)
     for member in channel.members:
         if member.voice:
             await member.move_to(None)
     if interaction:
         await interaction.followup.send('Time is up! Everyone has been disconnected.')
-
-app.add_routes([web.post('/join', handle_join_request)])
 
 async def start_web_server():
     runner = web.AppRunner(app)
@@ -140,11 +165,7 @@ async def start_web_server():
     print("Web server started.")
 
 async def main():
-    # Start the web server
     await start_web_server()
-
-    # Start the bot
     await bot.start(TOKEN)
 
-# Run the main function using asyncio
 asyncio.run(main())

@@ -1,4 +1,3 @@
-# Bot2 Code
 import discord
 from discord.ext import commands
 from aiohttp import web
@@ -16,6 +15,8 @@ intents.message_content = True  # Enable message content intents if using discor
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 app = web.Application()
+
+pending_disconnects = {}
 
 @bot.event
 async def on_ready():
@@ -49,6 +50,23 @@ async def leave(interaction: discord.Interaction):
         await interaction.response.send_message('Left the voice channel.')
     else:
         await interaction.response.send_message('I am not in a voice channel.')
+
+@bot.tree.command(name="defuse", description="Stop everyone from disconnecting and stop the MP3")
+async def defuse(interaction: discord.Interaction):
+    guild_id = interaction.guild.id
+    if guild_id in pending_disconnects:
+        pending_disconnects[guild_id].cancel()
+        del pending_disconnects[guild_id]
+        
+        if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
+            interaction.guild.voice_client.stop()
+        
+        if interaction.guild.voice_client:
+            await interaction.guild.voice_client.disconnect()
+        
+        await interaction.response.send_message('Defuse command received, everyone will stay connected, and the bot has disconnected.')
+    else:
+        await interaction.response.send_message('There is no pending disconnect to defuse.')
 
 async def handle_join_request(request):
     data = await request.json()
@@ -92,16 +110,25 @@ async def play_audio_and_check_command(guild, user, channel, interaction=None):
     def check(message):
         return message.content.lower() == '!specific_command' and message.author == user
 
+    disconnect_task = asyncio.create_task(disconnect_users_after_timeout(guild, user, channel, interaction))
+    pending_disconnects[guild.id] = disconnect_task
+
     try:
         await bot.wait_for('message', check=check, timeout=13)  # Wait for 3 minutes
+        disconnect_task.cancel()
+        del pending_disconnects[guild.id]
         if interaction:
             await interaction.followup.send('Command received in time, no one will be disconnected.')
     except asyncio.TimeoutError:
-        for member in channel.members:
-            if member.voice:
-                await member.move_to(None)
-        if interaction:
-            await interaction.followup.send('Time is up! Everyone has been disconnected.')
+        pass  # Timeout will be handled by the disconnect_users_after_timeout function
+
+async def disconnect_users_after_timeout(guild, user, channel, interaction=None):
+    await asyncio.sleep(13)  # Wait for the timeout period
+    for member in channel.members:
+        if member.voice:
+            await member.move_to(None)
+    if interaction:
+        await interaction.followup.send('Time is up! Everyone has been disconnected.')
 
 app.add_routes([web.post('/join', handle_join_request)])
 

@@ -84,11 +84,11 @@ async def handle_join_request(request):
 
             # Notify Bot1 to leave the voice channel
             async with aiohttp.ClientSession() as session:
-                async with session.post('http://localhost:8001/wingman_leave', json={'guild_id': guild_id}) as resp:
+                async with session.post('http://localhost:8000/leave', json={'guild_id': guild_id}) as resp:
                     if resp.status == 200:
-                        print("Wingman bot left the voice channel.")
+                        print("Bot1 left the voice channel.")
                     else:
-                        print("Failed to notify Wingman bot to leave the voice channel.")
+                        print("Failed to notify Bot1 to leave the voice channel.")
 
             return web.Response(text="Joined the voice channel!")
     return web.Response(status=400, text="Failed to join the voice channel.")
@@ -124,9 +124,29 @@ async def handle_leave_request(request):
         return web.Response(text="Bot has left the voice channel.")
     return web.Response(status=400, text="Bot failed to leave the voice channel.")
 
+async def handle_defuse_request(request):
+    data = await request.json()
+    guild_id = data.get('guild_id')
+
+    guild = bot.get_guild(guild_id)
+    if guild:
+        if guild.id in pending_disconnects:
+            pending_disconnects[guild.id].cancel()
+            del pending_disconnects[guild.id]
+
+            if guild.voice_client and guild.voice_client.is_playing():
+                guild.voice_client.stop()
+
+            if guild.voice_client:
+                await guild.voice_client.disconnect()
+
+            return web.Response(status=200, text="Spike has been defused")
+    return web.Response(status=400, text="Failed to defuse the spike")
+
 app.add_routes([web.post('/stop_disconnection', handle_stop_disconnection)])
 app.add_routes([web.post('/join', handle_join_request)])
 app.add_routes([web.post('/leave', handle_leave_request)])
+app.add_routes([web.post('/defuse', handle_defuse_request)])
 
 async def play_audio_and_check_command(guild, user, channel, interaction=None):
     mp3_path = 'resource/timer.mp3'
@@ -148,6 +168,7 @@ async def play_audio_and_check_command(guild, user, channel, interaction=None):
             await interaction.followup.send('Command received in time, no one will be disconnected.')
     except asyncio.TimeoutError:
         pass
+
 
 async def disconnect_users_after_timeout(guild, user, channel, interaction=None):
     await asyncio.sleep(13)

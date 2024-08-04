@@ -1,3 +1,4 @@
+# Bot1 Code
 import discord
 from discord.ext import commands
 import aiohttp
@@ -62,9 +63,12 @@ async def wingman_plant_the_spike(interaction: discord.Interaction):
 
     # Send a request to the second bot to join the voice channel
     async with aiohttp.ClientSession() as session:
-        async with session.post(SECOND_BOT_COMMAND_URL, json={'guild_id': interaction.guild.id, 'channel_id': channel.id}) as resp:
+        async with session.post(SECOND_BOT_COMMAND_URL, json={'guild_id': interaction.guild.id, 'channel_id': channel.id, 'user_id': interaction.user.id}) as resp:
             if resp.status == 200:
                 await interaction.followup.send("Wingman bot joined the voice channel!")
+                # Make the first bot leave the voice channel after the MP3 is done playing and Wingman joins
+                if interaction.guild.voice_client is not None:
+                    await interaction.guild.voice_client.disconnect()
             else:
                 await interaction.followup.send("Failed to get Wingman bot to join the voice channel.")
 

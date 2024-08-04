@@ -1,3 +1,4 @@
+# Bot2 Code
 import discord
 from discord.ext import commands
 from aiohttp import web
@@ -25,7 +26,7 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-@bot.tree.command(name="plant_the_spike", description="Join the voice channel")
+@bot.tree.command(name="plant_the_spike", description="Join the voice channel and play an MP3")
 async def join(interaction: discord.Interaction):
     if interaction.user.voice is None:
         await interaction.response.send_message("You are not connected to a voice channel.")
@@ -36,8 +37,10 @@ async def join(interaction: discord.Interaction):
         await interaction.guild.voice_client.move_to(channel)
     else:
         await channel.connect()
+
+    await interaction.response.send_message("Joined the voice channel and playing audio!")
     
-    await interaction.response.send_message("Joined the voice channel!")
+    await play_audio_and_check_command(interaction.guild, interaction.user, channel, interaction)
 
 @bot.tree.command(name="leave", description="Leave the voice channel")
 async def leave(interaction: discord.Interaction):
@@ -49,10 +52,16 @@ async def leave(interaction: discord.Interaction):
 
 async def handle_join_request(request):
     data = await request.json()
-    guild_id = data['guild_id']
-    channel_id = data['channel_id']
+    
+    guild_id = data.get('guild_id')
+    channel_id = data.get('channel_id')
+    user_id = data.get('user_id')  # Get user ID from the request data
+
+    if not all([guild_id, channel_id, user_id]):
+        return web.Response(status=400, text="Missing required parameters: guild_id, channel_id, or user_id.")
 
     guild = bot.get_guild(guild_id)
+    user = guild.get_member(user_id)  # Get the user object
     if guild:
         channel = guild.get_channel(channel_id)
         if channel:
@@ -60,6 +69,8 @@ async def handle_join_request(request):
                 await guild.voice_client.move_to(channel)
             else:
                 await channel.connect()
+
+            await play_audio_and_check_command(guild, user, channel)
 
             # Notify Bot1 to leave the voice channel
             async with aiohttp.ClientSession() as session:
@@ -71,6 +82,26 @@ async def handle_join_request(request):
 
             return web.Response(text="Joined the voice channel!")
     return web.Response(status=400, text="Failed to join the voice channel.")
+
+async def play_audio_and_check_command(guild, user, channel, interaction=None):
+    # Path to your MP3 file
+    mp3_path = 'resource/timer.mp3'
+    voice_client = guild.voice_client
+    voice_client.play(discord.FFmpegPCMAudio(mp3_path))
+
+    def check(message):
+        return message.content.lower() == '!specific_command' and message.author == user
+
+    try:
+        await bot.wait_for('message', check=check, timeout=13)  # Wait for 3 minutes
+        if interaction:
+            await interaction.followup.send('Command received in time, no one will be disconnected.')
+    except asyncio.TimeoutError:
+        for member in channel.members:
+            if member.voice:
+                await member.move_to(None)
+        if interaction:
+            await interaction.followup.send('Time is up! Everyone has been disconnected.')
 
 app.add_routes([web.post('/join', handle_join_request)])
 
